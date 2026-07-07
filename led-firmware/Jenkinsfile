@@ -5,6 +5,9 @@ pipeline {
         BUILD_DIR = 'build'
         PROJECT_DIR = 'led-firmware'
     }
+    options {
+        timestamps()
+    }
     stages {
         stage('Checkout') {
             steps { checkout scm }
@@ -39,12 +42,24 @@ pipeline {
         stage('Lint') {
             steps {
                 sh '''
+                set +e
+                REPORT_DIR=${PROJECT_DIR}/${BUILD_DIR}
+                mkdir -p "$REPORT_DIR"
+                REPORT="$REPORT_DIR/clang-format-report.txt"
+                echo "Clang-format report generated at: $REPORT" > "$REPORT"
+
                 if command -v clang-format >/dev/null 2>&1; then
-                    find ${PROJECT_DIR}/src ${PROJECT_DIR}/include -type f -name "*.c" -print0 | xargs -0 --no-run-if-empty clang-format --dry-run --Werror || true
-                    find ${PROJECT_DIR}/src ${PROJECT_DIR}/include -type f -name "*.h" -print0 | xargs -0 --no-run-if-empty clang-format --dry-run --Werror || true
+                    echo "Checking C files..." >> "$REPORT"
+                    find ${PROJECT_DIR}/src ${PROJECT_DIR}/include -type f -name "*.c" -print0 | xargs -0 --no-run-if-empty sh -c 'clang-format --dry-run --Werror "$@" 2>&1' sh >> "$REPORT" || true
+                    echo "Checking H files..." >> "$REPORT"
+                    find ${PROJECT_DIR}/src ${PROJECT_DIR}/include -type f -name "*.h" -print0 | xargs -0 --no-run-if-empty sh -c 'clang-format --dry-run --Werror "$@" 2>&1' sh >> "$REPORT" || true
                 else
-                    echo "clang-format not found; skipping lint"
+                    echo "clang-format not found; skipping lint" >> "$REPORT"
                 fi
+
+                echo "--- clang-format summary ---"
+                tail -n +1 "$REPORT" || true
+                exit 0
                 '''
             }
         }
@@ -76,8 +91,22 @@ pipeline {
 
         stage('Archive') {
             steps {
-                archiveArtifacts artifacts: "${env.PROJECT_DIR}/${env.BUILD_DIR}/*.elf,${env.PROJECT_DIR}/${env.BUILD_DIR}/*.hex,${env.PROJECT_DIR}/${env.BUILD_DIR}/*.bin"
+                archiveArtifacts artifacts: "${env.PROJECT_DIR}/${env.BUILD_DIR}/*.elf,${env.PROJECT_DIR}/${env.BUILD_DIR}/*.hex,${env.PROJECT_DIR}/${env.BUILD_DIR}/*.bin,${env.PROJECT_DIR}/${env.BUILD_DIR}/clang-format-report.txt", allowEmptyArchive: true
             }
         }
+    }
+    post {
+        always {
+            echo 'Post-build: archiving clang-format report and printing summary'
+            archiveArtifacts artifacts: "${env.PROJECT_DIR}/${env.BUILD_DIR}/clang-format-report.txt", allowEmptyArchive: true
+            sh 'echo "--- clang-format report (post) ---"; cat ${PROJECT_DIR}/${BUILD_DIR}/clang-format-report.txt || true'
+        }
+        success {
+            echo 'Build succeeded.'
+        }
+        failure {
+            echo 'Build failed.'
+        }
+    }
     }
 }
