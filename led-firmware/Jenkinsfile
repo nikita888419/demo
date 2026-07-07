@@ -1,0 +1,51 @@
+pipeline {
+    agent any
+    environment {
+        BUILD_DIR="build"
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Lint') {
+            steps {
+                sh '''
+                find src include \( -name "*.c" -o -name "*.h" \) \
+                | xargs clang-format --dry-run --Werror
+                '''
+            }
+        }
+        stage('Configure') {
+            steps {
+                sh '''
+                mkdir -p ${BUILD_DIR}
+                cd ${BUILD_DIR}
+                cmake .. \
+                -DCMAKE_TOOLCHAIN_FILE=../arm-gcc-toolchain.cmake
+                '''
+            }
+        }
+        stage('Build') {
+            steps {
+                sh '''
+                cd ${BUILD_DIR}
+                cmake --build .
+                '''
+            }
+        }
+        stage('Verify Artifacts') {
+            steps {
+                sh '''
+                ls -lh ${BUILD_DIR}
+                '''
+            }
+        }
+        stage('Archive') {
+            steps {
+                archiveArtifacts artifacts: 'build/*.elf,build/*.hex,build/*.bin'
+            }
+        }
+    }
+}
